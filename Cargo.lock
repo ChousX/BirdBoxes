@@ -3,6 +3,13 @@
 version = 3
 
 [[package]]
+name = "BirdBoxes"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
 name = "ab_glyph"
 version = "0.2.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -895,13 +902,6 @@ dependencies = [
  "concurrent-queue",
  "futures-lite",
  "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "bevy_template"
-version = "0.1.0"
-dependencies = [
- "bevy",
 ]
 
 [[package]]
