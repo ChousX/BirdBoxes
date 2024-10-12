@@ -85,7 +85,7 @@ impl IsoField {
                     self.get((x, y), size), // bottom left
                     self.get((x + 1, y), size), // bottom right
                 ]; 
-                let case = get_case(sample);
+                let case = get_case(sample, 0.5);
                 for tri_list in CASE_TABLE[case].iter(){
                     for index in tri_list.iter().filter_map(|&index| {
                         if index == -1{
@@ -134,6 +134,7 @@ impl IsoField {
     }
 }
 
+//what did I want you to do......
 fn reletive_indices_to_literal_indice(pos: (usize, usize), size: (usize, usize), indice: usize) -> [usize; 3]{
     todo!()
 }
@@ -142,8 +143,15 @@ fn new_vertex(size: (usize, usize), index: usize) -> Vec3{
     todo!()
 }
 
-fn get_case(sample: [f32; 4]) -> usize{
-    todo!()
+fn get_case(sample: [f32; 4], iso: f32) -> usize{
+    const MASK: [u32; 4] = [ 1, 2, 4, 8];
+    let mut out = 0u32;
+    for (i, f) in sample.iter().enumerate(){
+        if f > iso {
+            out = out | MASK[i];
+        }
+    }
+    out
 }
 
 
