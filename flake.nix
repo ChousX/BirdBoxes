@@ -24,6 +24,9 @@
           alsa-lib
           udev
           pkg-config
+
+          libxkbcommon
+          wayland
         ];
         nativeBuildInputs = with pkgs; [
           libxkbcommon

@@ -1,3 +1,4 @@
+
 pub use bevy::prelude::*;
 use bevy::{
     render::{
@@ -31,7 +32,7 @@ impl ChunkSize {
 
 impl Default for ChunkSize{
     fn default() -> Self{
-        Self(3, 3)
+        Self(2, 2)
     }
 }
 
@@ -67,53 +68,65 @@ impl IsoField {
     pub fn set(&mut self, size: impl Into<(usize, usize)>, pos: impl Into<(usize, usize)>, element: f32){
         let i = Self::index(pos, size);
         self[i] = element;
+        dbg!(&self.0);
     }
 
     pub fn build_mesh(&self, size: (usize, usize), resolution: f32 ) -> Mesh{
-        let mut used_indices = HashMap::<usize, usize>::new();
+        let mut used_indices = HashMap::<HashAbleVec2, usize>::new();
         let mut vertexes = Vec::new();
         let mut indices = Vec::<u32>::new();
         let mut normals = Vec::<Vec3>::new();
         let mut face_count = Vec::<usize>::new();
         let mut uvs = Vec::<Vec2>::new();
+        //March through all the boxes (n - 1)
         for x in 0..(size.0 - 1){
             for y in 0..(size.1 - 1){
-
+                
+                //Grabbing box corner boxes 
                 let sample = [
                     self.get((x, y + 1), size), // top left
                     self.get((x + 1, y + 1), size), // top right
                     self.get((x, y), size), // bottom left
                     self.get((x + 1, y), size), // bottom right
                 ]; 
+                //Converting [f32; 4] into u32
                 let case = get_case(sample, 0.5);
+
+                //Grabbing the list of triangles 
                 for tri_list in CASE_TABLE[case].iter(){
+                    //Grabbing all valid indices
                     for index in tri_list.iter().filter_map(|&index| {
                         if index == -1{
                             None
                         } else {
-                            Some(index as usize)
+                            Some(index)
                         }
                     }){
-                        for indice in reletive_indices_to_literal_indice((x, y), size, index).iter() {
-                            if let Some(corrected_indice) = used_indices.get(indice){
-                                indices.push(*corrected_indice as u32);
-                            } else {
-                                let index = indices.len();
-                                used_indices.insert(*indice, index);
-                                vertexes.push(new_vertex(size, *indice));
-                                indices.push(index as u32);
-                                normals.push(Vec3::new(0.0, 0.0, 0.0));
-                                uvs.push(Vec2::new(0.0, 0.0));
-                                face_count.push(0);
-                            }
+                        //converting i8 to the correct vec2
+                        let vertex = tri_index_to_vertex(index);
+                        //applying iso_spacing and offset
+                        let vertex = vertex_relitive((x, y), vertex, 1.0);
+                        //convert into a hashable type
+                        let h_vertex = HashAbleVec2::from(vertex.clone());
+                        if let Some(corrected_indice) = used_indices.get( &h_vertex){
+                            indices.push(*corrected_indice as u32);
+                        } else {
+                            let index = indices.len();
+                            used_indices.insert(h_vertex, index);
+                            vertexes.push(vertex.extend(0.0));
+                            indices.push(index as u32);
+                            normals.push(Vec3::new(0.0, 0.0, 0.0));
+                            uvs.push(Vec2::new(0.0, 0.0));
+                            face_count.push(0);
                         }
                     }
                 } 
             }
         }
-
+        /*
         for tri_start in (0..(indices.len())).step_by(3){
-            let tri_noraml = vertexes[tri_start].normalize() + vertexes[tri_start +1].normalize() + vertexes[tri_start + 2].normalize();
+            //i think this is unsued?
+            //let tri_noraml = vertexes[tri_start].normalize() + vertexes[tri_start +1].normalize() + vertexes[tri_start + 2].normalize();
             face_count[tri_start]     += 1;
             face_count[tri_start + 1] += 1;
             face_count[tri_start + 2] += 1;
@@ -122,6 +135,7 @@ impl IsoField {
         for i in 0..vertexes.len(){
             normals[i] = (normals[i] / face_count[i] as f32).normalize();
         }
+        */
 
         Mesh::new(
             PrimitiveTopology::TriangleList,
@@ -134,24 +148,16 @@ impl IsoField {
     }
 }
 
-//what did I want you to do......
-fn reletive_indices_to_literal_indice(pos: (usize, usize), size: (usize, usize), indice: usize) -> [usize; 3]{
-    todo!()
-}
-
-fn new_vertex(size: (usize, usize), index: usize) -> Vec3{
-    todo!()
-}
-
 fn get_case(sample: [f32; 4], iso: f32) -> usize{
-    const MASK: [u32; 4] = [ 1, 2, 4, 8];
-    let mut out = 0u32;
+    //const MASK: [usize; 4] = [ 8, 4, 2, 1];
+    const MASK: [usize; 4] = [ 1, 2, 4, 8];
+    let mut out = 0usize;
     for (i, f) in sample.iter().enumerate(){
-        if f > iso {
+        if *f > iso {
             out = out | MASK[i];
         }
     }
-    out
+    dbg!(out)
 }
 
 
@@ -197,6 +203,58 @@ fn update_mesh(
             panic!("Mesh that should be there is not!")
         }
     }
+}
+
+fn tri_index_to_vertex(index: i8) -> Vec2 {
+    match index {
+        0 => Vec2::new(0.0, 0.0),
+        1 => Vec2::new(0.0, 0.5),
+        2 => Vec2::new(0.0, 1.0),
+        3 => Vec2::new(0.5, 1.0),
+        4 => Vec2::new(1.0, 1.0),
+        5 => Vec2::new(1.0, 0.5),
+        6 => Vec2::new(1.0, 0.0),
+        7 => Vec2::new(0.5, 0.0),
+        _ => unreachable!()
+    }
+}
+
+fn vertex_relitive(
+    pos: (usize, usize), 
+    mut vertex: Vec2, 
+    iso_spacing: f32
+) -> Vec2 {
+    let (x, y) = pos;
+    vertex *= iso_spacing;
+    vertex.x += iso_spacing * x as f32;
+    vertex.y += iso_spacing * y as f32;
+    vertex
+}
+
+#[derive(Hash, Eq, PartialEq)]
+pub struct HashAbleVec2{
+    x: (u32, i16, i8),
+    y: (u32, i16, i8),
+}
+
+impl From<Vec2> for HashAbleVec2{
+    fn from(val: Vec2) -> Self{
+        Self { x: integer_decode(val.x), y: integer_decode(val.y) }
+    }
+}
+
+fn integer_decode(val: f32) -> (u32, i16, i8) {
+    let bits: u32 = unsafe { std::mem::transmute(val) };
+    let sign: i8 = if bits >> 31 == 0 { 1 } else { -1 };
+    let mut exponent: i16 = ((bits >> 23) & 0xff) as i16;
+    let mantissa = if exponent == 0 {
+        (bits & 0x7fffff) << 1
+    } else {
+        (bits & 0x7fffff) | 0x800000
+    };
+
+    exponent -= 127 + 23;
+    (mantissa, exponent, sign)
 }
 
 const CASE_TABLE: [[[i8; 3]; 4]; 16] = [
