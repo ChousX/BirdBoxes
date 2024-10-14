@@ -64,17 +64,17 @@ fn add_mesh(
 }
 
 fn update_mesh(
-    iso_field_q: Query<(&IsoField, &Mesh2dHandle), Changed<IsoField>>,
+    mut iso_field_q: Query<(&IsoField, &mut Mesh2dHandle), Changed<IsoField>>,
     mut meshes: ResMut<Assets<Mesh>>,
     iso_level: Res<IsoLevel>,
     iso_distance: Res<IsoDistance>,
 ){
-    for (iso_field, mesh_2d) in iso_field_q.iter(){
+    for (iso_field, mut mesh_2d) in iso_field_q.iter_mut(){
         info!("Mesh Update");
         let mesh = meshes.add(iso_field
                 .sample_all()
                 .build_mesh(iso_distance.0, iso_level.0));
-        if let Some(mut stored_mesh) = meshes.get_mut(mesh_2d.0.clone()){
+        if let Some(stored_mesh) = meshes.get_mut(&mut mesh_2d.0){
 
         }
     }

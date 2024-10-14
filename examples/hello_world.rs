@@ -1,3 +1,4 @@
+use bevy::color::palettes::css::PINK;
 use BirdBoxes::*;
 use bevy::prelude::*;
 use bevy::sprite::MaterialMesh2dBundle;
@@ -20,7 +21,7 @@ fn test(
     commands.spawn(Camera2dBundle::default());
     let mut iso_field = IsoField::new((2, 2));
     iso_field.set(1, 1, 1.0);
-    let material = materials.add(Color::PINK);
+    let material = materials.add(Color::from(PINK));
     commands.spawn(BirdBoxeBundle{
         iso_field,
         transform: Transform::from_scale(Vec3::new(10.0, 10.0, 0.0)),
