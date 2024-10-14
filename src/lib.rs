@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy::tasks::ParallelIterator;
 use bevy::{
     render::{
         mesh::Indices, render_asset::RenderAssetUsages, render_resource::PrimitiveTopology
@@ -50,7 +49,6 @@ fn add_mesh(
     mut commands: Commands,
     iso_field_q: Query<(&IsoField, Entity), Without<Mesh2dHandle>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    chunk_size: Res<ChunkSize>,
     iso_level: Res<IsoLevel>,
     iso_distance: Res<IsoDistance>,
 ){
@@ -71,11 +69,11 @@ fn update_mesh(
 ){
     for (iso_field, mut mesh_2d) in iso_field_q.iter_mut(){
         info!("Mesh Update");
-        let mesh = meshes.add(iso_field
+        let mesh = iso_field
                 .sample_all()
-                .build_mesh(iso_distance.0, iso_level.0));
+                .build_mesh(iso_distance.0, iso_level.0);
         if let Some(stored_mesh) = meshes.get_mut(&mut mesh_2d.0){
-
+            *stored_mesh = mesh;
         }
     }
 }
@@ -111,7 +109,7 @@ impl IsoField {
     }
 
     pub fn new_from(size: impl Into<Size>, vec: Vec<f32>) -> Self {
-        let (x, y): Size = size.into();
+        let (x, _y): Size = size.into();
         #[cfg(debug_assertions)]
         if vec.len() % x != 0 {
             panic!("vec len and size do not match");
@@ -197,7 +195,7 @@ impl IsoSamples {
                             //face_count.push(0);
                         }
                     } else {
-                        //continue 'a;
+                        continue 'a;
                     }
                 }
             }

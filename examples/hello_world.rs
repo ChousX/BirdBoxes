@@ -1,12 +1,11 @@
 use bevy::color::palettes::css::PINK;
 use BirdBoxes::*;
 use bevy::prelude::*;
-use bevy::sprite::MaterialMesh2dBundle;
 
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(Color::rgb(0.5, 0.5, 0.9)))
+        .insert_resource(ClearColor(Color::srgb(0.5, 0.5, 0.9)))
         .add_plugins(BirdBoxesPlugin)
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, test)
@@ -15,7 +14,6 @@ fn main() {
 
 fn test(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ){
     commands.spawn(Camera2dBundle::default());
