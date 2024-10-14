@@ -3,7 +3,8 @@ use bevy::tasks::ParallelIterator;
 use bevy::{
     render::{
         mesh::Indices, render_asset::RenderAssetUsages, render_resource::PrimitiveTopology
-    }, sprite::Mesh2dHandle, utils::HashMap
+    }, sprite::Mesh2dHandle, utils::HashMap,
+    log::info,
 };
 
 pub struct BirdBoxesPlugin;
@@ -13,7 +14,7 @@ impl Plugin for BirdBoxesPlugin{
             .init_resource::<ChunkSize>()
             .init_resource::<IsoLevel>()
             .init_resource::<IsoDistance>()
-            .add_systems(Update, add_mesh);
+            .add_systems(PreUpdate, (add_mesh, update_mesh).chain());
     }
 }
 
@@ -47,31 +48,50 @@ impl Default for IsoDistance{
 
 fn add_mesh(
     mut commands: Commands,
-    iso_field_q: Query<(&IsoField, &Entity, Without<Mesh2dHandle>)>,
+    iso_field_q: Query<(&IsoField, Entity), Without<Mesh2dHandle>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
     chunk_size: Res<ChunkSize>,
     iso_level: Res<IsoLevel>,
     iso_distance: Res<IsoDistance>,
 ){
     for (field, entity) in iso_field_q.iter(){
-        let mesh_2d = Mesh2dHandle(meshes.add(field.sample_all().build_mesh(iso_distance.0, iso_level.0)));
-        let material = materials.add(Color::PINK);
-        commands.entity(entity).insert((mesh_2d, material));
+        info!("New Mesh");
+        let mesh_2d = Mesh2dHandle(meshes.add(field
+                    .sample_all()
+                    .build_mesh(iso_distance.0, iso_level.0)));
+        commands.entity(entity).insert(mesh_2d);
     }
 }
 
+fn update_mesh(
+    iso_field_q: Query<(&IsoField, &Mesh2dHandle), Changed<IsoField>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    iso_level: Res<IsoLevel>,
+    iso_distance: Res<IsoDistance>,
+){
+    for (iso_field, mesh_2d) in iso_field_q.iter(){
+        info!("Mesh Update");
+        let mesh = meshes.add(iso_field
+                .sample_all()
+                .build_mesh(iso_distance.0, iso_level.0));
+        if let Some(mut stored_mesh) = meshes.get_mut(mesh_2d.0.clone()){
 
-pub struct BirdBoxeBundle{
+        }
+    }
+}
+
+#[derive(Bundle, Default)]
+pub struct BirdBoxeBundle<M: Asset>{
     pub iso_field: IsoField,
     pub transform: Transform,
     pub global_transform: GlobalTransform,
     pub visibility: Visibility,
     pub inherited_visibility: InheritedVisibility,
+    pub material: Handle<M>,
     pub view_visibility: ViewVisibility,
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct IsoField{
     x_size: usize,
     field: Vec<f32>
@@ -137,7 +157,7 @@ impl IsoField {
 }
 
 
-struct IsoSamples(Vec<(IsoSample, usize, usize)>);
+pub struct IsoSamples(Vec<(IsoSample, usize, usize)>);
 impl Iterator for IsoSamples {
     type Item = (IsoSample, usize, usize);
     fn next(&mut self) -> Option<Self::Item>{
@@ -147,11 +167,12 @@ impl Iterator for IsoSamples {
 
 impl IsoSamples {
     fn build_mesh(self, iso_distance: f32, iso_level: f32) -> Mesh {
+        info!("Building Mesh[\n   iso_distance:{iso_distance}\n   iso_level:{iso_level}\n]");
         let mut used_indices = HashMap::<HashAbleVec2, usize>::new();
         let mut vertexes = Vec::<Vec3>::new();
         let mut indices = Vec::<u32>::new();
         let mut normals = Vec::<Vec3>::new();
-        let mut face_count = Vec::<usize>::new();
+        //let mut face_count = Vec::<usize>::new();
         let mut uvs = Vec::<Vec2>::new();
         'a:for (sample, x, y) in self{
             for tri in sample.to_tri_list(0.5){
@@ -166,26 +187,60 @@ impl IsoSamples {
                         if let Some(indice) = used_indices.get(&h_vertex){
                             indices.push(*indice as u32);
                         } else {
-                            // add indice
-                            let indice = indices.len();
+                            // add vertex
+                            let indice = vertexes.len();
                             used_indices.insert(h_vertex, indice);
                             vertexes.push(vertex.extend(0.0));
                             indices.push(indice as u32);
                             normals.push(Vec3::new(0.0, 0.0, 1.0));
                             uvs.push(Vec2::new(0.0, 0.0));
-                            face_count.push(0);
+                            //face_count.push(0);
                         }
                     } else {
-                        continue 'a;
+                        //continue 'a;
                     }
                 }
             }
         }
-        //We still need to 
-        //  Set the normals
+        /*
+        for i in (0..(indices.len())).step_by(3) {
+            //getting the indices
+            let (i0, i1, i2) = (
+                indices[i] as usize,
+                indices[i + 1] as usize,
+                indices[i + 2] as usize,
+            );
+
+            //gettting the vertexes
+            let (v0, v1, v2) = (
+                vertexes[i0],    
+                vertexes[i1],    
+                vertexes[i2],    
+            );
+
+            //calculating the normal
+            let normal = (v1 - v0).cross(v2 - v0).normalize();
+
+            //adding the normal to all the indice
+            normals[i0] += normal;
+            normals[i1] += normal;
+            normals[i2] += normal;
+
+            //add one to the face counter for later
+            face_count[i0] += 1;
+            face_count[i1] += 1;
+            face_count[i2] += 1;
+        }
+        
+        //finishing the normals
+        for i in 0..vertexes.len(){
+            normals[i] /= face_count[i] as f32;
+        }
+        */
+
         Mesh::new(
             PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
+            RenderAssetUsages::RENDER_WORLD,
         )
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vertexes)
             .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
@@ -194,7 +249,7 @@ impl IsoSamples {
     }
 }
 
-struct IsoSample([f32; 4]);
+pub struct IsoSample([f32; 4]);
 impl IsoSample{
     pub fn to_case(self, iso_level: f32) -> u8{
         const MASK: [u8; 4] = [ 1, 2, 4, 8];
