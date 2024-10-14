@@ -1,142 +1,188 @@
-
-pub use bevy::prelude::*;
+use bevy::prelude::*;
+use bevy::tasks::ParallelIterator;
 use bevy::{
     render::{
         mesh::Indices, render_asset::RenderAssetUsages, render_resource::PrimitiveTopology
     }, sprite::Mesh2dHandle, utils::HashMap
 };
 
-mod gpu;
-mod cpu;
-
 pub struct BirdBoxesPlugin;
 impl Plugin for BirdBoxesPlugin{
     fn build(&self, app: &mut App) {
         app
             .init_resource::<ChunkSize>()
-            .init_resource::<ChunkIsoReselution>()
-            .add_systems(PreUpdate, add_mesh)
-            .add_systems(Update, update_mesh);
+            .init_resource::<IsoLevel>()
+            .init_resource::<IsoDistance>()
+            .add_systems(Update, add_mesh);
     }
 }
 
+///The Size Of the IsoField
 #[derive(Resource, Debug)]
-pub struct ChunkSize(usize, usize);
-impl ChunkSize {
-    pub fn x(&self) -> usize { self.0 }
-    pub fn y(&self) -> usize { self.1 }
-    pub fn get(&self) -> (usize, usize){
-        (self.0, self.1)
-    }
-}
-
+pub struct ChunkSize(pub u32, pub u32);
 impl Default for ChunkSize{
     fn default() -> Self{
         Self(2, 2)
     }
 }
 
-#[derive(Resource, Debug, Deref)]
-pub struct ChunkIsoReselution(pub f32);
-
-impl ChunkIsoReselution{
-    pub fn get(&self) -> f32{self.0}
-}
-impl Default for ChunkIsoReselution{
+///The threshold when 
+#[derive(Resource, Debug)]
+pub struct IsoLevel(pub f32);
+impl Default for IsoLevel{
     fn default() -> Self{
         Self(1.0)
     }
 }
 
-#[derive(Component, Deref, DerefMut, Default)]
-pub struct IsoField(Vec<f32>);
+#[derive(Resource, Debug)]
+pub struct IsoDistance(pub f32);
+impl Default for IsoDistance{
+    fn default() -> Self{
+        Self(1.0)
+    }
+}
+
+/////////
+
+fn add_mesh(
+    mut commands: Commands,
+    iso_field_q: Query<(&IsoField, &Entity, Without<Mesh2dHandle>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    chunk_size: Res<ChunkSize>,
+    iso_level: Res<IsoLevel>,
+    iso_distance: Res<IsoDistance>,
+){
+    for (field, entity) in iso_field_q.iter(){
+        let mesh_2d = Mesh2dHandle(meshes.add(field.sample_all().build_mesh(iso_distance.0, iso_level.0)));
+        let material = materials.add(Color::PINK);
+        commands.entity(entity).insert((mesh_2d, material));
+    }
+}
+
+
+pub struct BirdBoxeBundle{
+    pub iso_field: IsoField,
+    pub transform: Transform,
+    pub global_transform: GlobalTransform,
+    pub visibility: Visibility,
+    pub inherited_visibility: InheritedVisibility,
+    pub view_visibility: ViewVisibility,
+}
+
+#[derive(Component)]
+pub struct IsoField{
+    x_size: usize,
+    field: Vec<f32>
+}
+
+type Size = (usize, usize);
+
+//New iso field fn's
 impl IsoField {
-    pub fn new(chunk_size: impl Into<(usize, usize)>) -> Self{
-        let (x, y): (usize, usize) = chunk_size.into();
+    pub fn new(size: impl Into<Size>) -> Self{
+        let (x, y): Size = size.into();
         let field = vec![0.0; x * y];
-        Self(field)
-    }
-    fn index(pos: impl Into<(usize, usize)>, size: impl Into<(usize, usize)>) -> usize {
-        let (x, y): (usize, usize) = pos.into();
-        let (sx, _): (usize, usize) =  size.into();
-        sx * y + x
-    }
-    pub fn get(&self, pos: impl Into<(usize, usize)>, size: impl Into<(usize, usize)>) -> f32{
-        let i = Self::index(pos, size);
-        self[i]
-    }
-    pub fn set(&mut self, size: impl Into<(usize, usize)>, pos: impl Into<(usize, usize)>, element: f32){
-        let i = Self::index(pos, size);
-        self[i] = element;
-        dbg!(&self.0);
+        Self{
+            x_size: x,
+            field
+        }
     }
 
-    pub fn build_mesh(&self, size: (usize, usize), resolution: f32 ) -> Mesh{
+    pub fn new_from(size: impl Into<Size>, vec: Vec<f32>) -> Self {
+        let (x, y): Size = size.into();
+        #[cfg(debug_assertions)]
+        if vec.len() % x != 0 {
+            panic!("vec len and size do not match");
+        }
+        Self{
+            x_size: x,
+            field: vec
+        }
+    }
+}
+
+//getters and setters
+impl IsoField {
+    pub fn get(&self, x: usize, y: usize) -> f32{
+        self.field[self.index(x, y)]
+    }
+    pub fn set(&mut self, x: usize, y: usize, val: f32){
+        let index = self.index(x, y);
+        self.field[index] = val
+    }
+    pub fn sample(&self, x: usize, y: usize) -> IsoSample{
+        let sample = [
+                    self.get(x, y ), // bottom left
+                    self.get(x, y + 1), // top left
+                    self.get(x + 1, y + 1), // top right
+                    self.get(x + 1, y), // bottom right
+        ];
+        IsoSample(sample)
+    }
+    pub fn sample_all(&self) -> IsoSamples {
+        let mut samples = Vec::new();
+        let y_size = self.field.len() / self.x_size;
+        for y in 0..(y_size - 1){
+            for x in 0..(self.x_size - 1){
+                samples.push((self.sample(x, y), x, y));
+            }
+        }
+        IsoSamples(samples)
+    }
+    fn index(&self, x: usize, y: usize) -> usize{
+        y * self.x_size as usize + x
+    }
+}
+
+
+struct IsoSamples(Vec<(IsoSample, usize, usize)>);
+impl Iterator for IsoSamples {
+    type Item = (IsoSample, usize, usize);
+    fn next(&mut self) -> Option<Self::Item>{
+        self.0.pop()
+    }
+}
+
+impl IsoSamples {
+    fn build_mesh(self, iso_distance: f32, iso_level: f32) -> Mesh {
         let mut used_indices = HashMap::<HashAbleVec2, usize>::new();
-        let mut vertexes = Vec::new();
+        let mut vertexes = Vec::<Vec3>::new();
         let mut indices = Vec::<u32>::new();
         let mut normals = Vec::<Vec3>::new();
         let mut face_count = Vec::<usize>::new();
         let mut uvs = Vec::<Vec2>::new();
-        //March through all the boxes (n - 1)
-        for x in 0..(size.0 - 1){
-            for y in 0..(size.1 - 1){
-                
-                //Grabbing box corner boxes 
-                let sample = [
-                    self.get((x, y + 1), size), // top left
-                    self.get((x + 1, y + 1), size), // top right
-                    self.get((x, y), size), // bottom left
-                    self.get((x + 1, y), size), // bottom right
-                ]; 
-                //Converting [f32; 4] into u32
-                let case = get_case(sample, 0.5);
-
-                //Grabbing the list of triangles 
-                for tri_list in CASE_TABLE[case].iter(){
-                    //Grabbing all valid indices
-                    for index in tri_list.iter().filter_map(|&index| {
-                        if index == -1{
-                            None
-                        } else {
-                            Some(index)
-                        }
-                    }){
-                        //converting i8 to the correct vec2
-                        let vertex = tri_index_to_vertex(index);
-                        //applying iso_spacing and offset
-                        let vertex = vertex_relitive((x, y), vertex, 1.0);
-                        //convert into a hashable type
+        'a:for (sample, x, y) in self{
+            for tri in sample.to_tri_list(0.5){
+                for tri_index in tri{
+                    if let Some(vertex) = tri_index_to_vertex(tri_index){
+                        let vertex = {
+                            let x_off = x as f32 * iso_distance;
+                            let y_off = y as f32 * iso_distance;
+                            Vec2::new(x_off, y_off) + vertex * iso_distance
+                        };
                         let h_vertex = HashAbleVec2::from(vertex.clone());
-                        if let Some(corrected_indice) = used_indices.get( &h_vertex){
-                            indices.push(*corrected_indice as u32);
+                        if let Some(indice) = used_indices.get(&h_vertex){
+                            indices.push(*indice as u32);
                         } else {
-                            let index = indices.len();
-                            used_indices.insert(h_vertex, index);
+                            // add indice
+                            let indice = indices.len();
+                            used_indices.insert(h_vertex, indice);
                             vertexes.push(vertex.extend(0.0));
-                            indices.push(index as u32);
-                            normals.push(Vec3::new(0.0, 0.0, 0.0));
+                            indices.push(indice as u32);
+                            normals.push(Vec3::new(0.0, 0.0, 1.0));
                             uvs.push(Vec2::new(0.0, 0.0));
                             face_count.push(0);
                         }
+                    } else {
+                        continue 'a;
                     }
-                } 
+                }
             }
         }
-        /*
-        for tri_start in (0..(indices.len())).step_by(3){
-            //i think this is unsued?
-            //let tri_noraml = vertexes[tri_start].normalize() + vertexes[tri_start +1].normalize() + vertexes[tri_start + 2].normalize();
-            face_count[tri_start]     += 1;
-            face_count[tri_start + 1] += 1;
-            face_count[tri_start + 2] += 1;
-        }
-
-        for i in 0..vertexes.len(){
-            normals[i] = (normals[i] / face_count[i] as f32).normalize();
-        }
-        */
-
+        //We still need to 
+        //  Set the normals
         Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
@@ -148,65 +194,28 @@ impl IsoField {
     }
 }
 
-fn get_case(sample: [f32; 4], iso: f32) -> usize{
-    //const MASK: [usize; 4] = [ 8, 4, 2, 1];
-    const MASK: [usize; 4] = [ 1, 2, 4, 8];
-    let mut out = 0usize;
-    for (i, f) in sample.iter().enumerate(){
-        if *f > iso {
-            out = out | MASK[i];
+struct IsoSample([f32; 4]);
+impl IsoSample{
+    pub fn to_case(self, iso_level: f32) -> u8{
+        const MASK: [u8; 4] = [ 1, 2, 4, 8];
+        let mut out = 0;
+        for (i, f) in self.0.iter().enumerate(){
+            if *f > iso_level {
+                out = out | MASK[i];
+            }
         }
-    }
     dbg!(out)
-}
+    }
 
-
-#[derive(Bundle, Default)]
-pub struct ChunkBundle {
-    pub iso_field: IsoField,
-    pub transform: Transform,
-    pub global_transform: GlobalTransform,
-    pub visibility: Visibility,
-    pub inherited_visibility: InheritedVisibility,
-    pub view_visibility: ViewVisibility,
-}
-
-fn add_mesh(
-    mut chunk_query: Query<(&IsoField, &Transform, Entity), Without<Mesh2dHandle>>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    chunk_size: Res<ChunkSize>,
-    chunk_reselution: Res<ChunkIsoReselution>,
-){
-    for (iso_field, pos, entity) in chunk_query.iter(){
-        let mesh = iso_field.build_mesh(chunk_size.get(), chunk_reselution.get());
-        let mesh_2d = Mesh2dHandle (meshes.add(mesh));
-        let material = materials.add(Color::PURPLE);
-        commands.entity(entity).insert((mesh_2d, material));
+    pub fn to_tri_list(self, iso_level: f32) -> [[i8; 3]; 4]{
+        let case = self.to_case(iso_level) as usize;
+        CASE_TABLE[case]
     }
 }
 
-fn update_mesh(
-    mut chunk_query: Query<(&IsoField, &Transform, &Mesh2dHandle), Changed<IsoField>>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    chunk_size: Res<ChunkSize>,
-    chunk_reselution: Res<ChunkIsoReselution>,
-){
-    for (iso_field, pos, Mesh2dHandle(mesh_id)) in chunk_query.iter(){
-        let mesh = iso_field.build_mesh(chunk_size.get(), chunk_reselution.get());
-        if let Some(mut mesh_entity) = meshes.get_mut(mesh_id){
-            *mesh_entity = mesh;
-        } else {
-            panic!("Mesh that should be there is not!")
-        }
-    }
-}
-
-fn tri_index_to_vertex(index: i8) -> Vec2 {
-    match index {
+fn tri_index_to_vertex(index: i8) -> Option<Vec2>{
+    Some(match index {
+        -1 => {return None;},
         0 => Vec2::new(0.0, 0.0),
         1 => Vec2::new(0.0, 0.5),
         2 => Vec2::new(0.0, 1.0),
@@ -216,23 +225,11 @@ fn tri_index_to_vertex(index: i8) -> Vec2 {
         6 => Vec2::new(1.0, 0.0),
         7 => Vec2::new(0.5, 0.0),
         _ => unreachable!()
-    }
-}
-
-fn vertex_relitive(
-    pos: (usize, usize), 
-    mut vertex: Vec2, 
-    iso_spacing: f32
-) -> Vec2 {
-    let (x, y) = pos;
-    vertex *= iso_spacing;
-    vertex.x += iso_spacing * x as f32;
-    vertex.y += iso_spacing * y as f32;
-    vertex
+    })
 }
 
 #[derive(Hash, Eq, PartialEq)]
-pub struct HashAbleVec2{
+struct HashAbleVec2{
     x: (u32, i16, i8),
     y: (u32, i16, i8),
 }
@@ -256,6 +253,7 @@ fn integer_decode(val: f32) -> (u32, i16, i8) {
     exponent -= 127 + 23;
     (mantissa, exponent, sign)
 }
+
 
 const CASE_TABLE: [[[i8; 3]; 4]; 16] = [
     // 1

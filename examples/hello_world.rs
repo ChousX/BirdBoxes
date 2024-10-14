@@ -13,8 +13,8 @@ fn main() {
 fn test(mut commands: Commands){
     commands.spawn(Camera2dBundle::default());
     let mut iso_field = IsoField::new((2, 2));
-    iso_field.set((2, 2), (0,0), 1.0);
-    commands.spawn(ChunkBundle{
+    iso_field.set((1, 1), (0,0), 1.0);
+    commands.spawn(BirdBoxeBundle{
         iso_field,
         ..default()
     });
