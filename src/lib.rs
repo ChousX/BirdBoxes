@@ -200,41 +200,6 @@ impl IsoSamples {
                 }
             }
         }
-        /*
-        for i in (0..(indices.len())).step_by(3) {
-            //getting the indices
-            let (i0, i1, i2) = (
-                indices[i] as usize,
-                indices[i + 1] as usize,
-                indices[i + 2] as usize,
-            );
-
-            //gettting the vertexes
-            let (v0, v1, v2) = (
-                vertexes[i0],    
-                vertexes[i1],    
-                vertexes[i2],    
-            );
-
-            //calculating the normal
-            let normal = (v1 - v0).cross(v2 - v0).normalize();
-
-            //adding the normal to all the indice
-            normals[i0] += normal;
-            normals[i1] += normal;
-            normals[i2] += normal;
-
-            //add one to the face counter for later
-            face_count[i0] += 1;
-            face_count[i1] += 1;
-            face_count[i2] += 1;
-        }
-        
-        //finishing the normals
-        for i in 0..vertexes.len(){
-            normals[i] /= face_count[i] as f32;
-        }
-        */
 
         Mesh::new(
             PrimitiveTopology::TriangleList,
@@ -257,7 +222,7 @@ impl IsoSample{
                 out = out | MASK[i];
             }
         }
-    dbg!(out)
+        out
     }
 
     pub fn to_tri_list(self, iso_level: f32) -> [[i8; 3]; 4]{
